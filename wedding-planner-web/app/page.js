@@ -2028,7 +2028,7 @@ function ScheduleView({ structure, onChange }) {
     <div>
       <h1 className="font-display text-2xl font-bold mb-5">스케줄</h1>
 
-      <div className="rounded-2xl p-5" style={card}>
+      <div className="rounded-2xl p-3 md:p-5" style={card}>
         <div className="flex items-center justify-center gap-4 mb-4">
           <button onClick={() => changeMonth(-1)} className="p-1.5 rounded hover:bg-gray-50" style={{ color: "#8C8480" }}><ChevronLeft size={18} /></button>
           <button onClick={() => setJumping(true)} className="font-bold font-mono text-sm px-2 py-1 rounded hover:bg-gray-50">{year}. {pad(month + 1)}</button>
@@ -2036,7 +2036,7 @@ function ScheduleView({ structure, onChange }) {
         </div>
         <div className="grid grid-cols-7 border-b" style={{ borderColor: "#ECE7E4" }}>
           {weekday.map((w, i) => (
-            <div key={w} className="text-center text-xs py-2 font-medium" style={{ color: i === 6 ? "#7C93A8" : "#8C8480" }}>{w}</div>
+            <div key={w} className="min-w-0 text-center text-xs py-2 font-medium" style={{ color: i === 6 ? "#7C93A8" : "#8C8480" }}>{w}</div>
           ))}
         </div>
         <div className="grid grid-cols-7">
@@ -2044,7 +2044,7 @@ function ScheduleView({ structure, onChange }) {
             const isLastCol = i % 7 === 6;
             const isLastRow = i >= Math.floor((cells.length - 1) / 7) * 7;
             const edgeClass = `${isLastRow ? "" : "border-b"} ${isLastCol ? "" : "border-r"}`;
-            if (d === null) return <div key={i} className={edgeClass} style={{ height: CELL_HEIGHT, borderColor: "#F3EFEC" }} />;
+            if (d === null) return <div key={i} className={"min-w-0 " + edgeClass} style={{ height: CELL_HEIGHT, borderColor: "#F3EFEC" }} />;
             const iso = `${year}-${pad(month + 1)}-${pad(d)}`;
             const isToday = iso === todayISO();
             const dayT = (tasksByDate[iso] || []).sort((a, b) => a.done - b.done);
@@ -2055,11 +2055,11 @@ function ScheduleView({ structure, onChange }) {
               <button
                 key={i}
                 onClick={() => setOpenDate(iso)}
-                className={`p-1.5 flex flex-col items-start gap-0.5 text-left hover:bg-gray-50/50 transition-colors overflow-hidden ${edgeClass}`}
+                className={`min-w-0 p-1 md:p-1.5 flex flex-col items-start gap-0.5 text-left hover:bg-gray-50/50 transition-colors overflow-hidden ${edgeClass}`}
                 style={{ height: CELL_HEIGHT, borderColor: "#F3EFEC" }}
               >
                 <span
-                  className="text-xs font-mono w-5 h-5 flex items-center justify-center rounded-full mb-0.5"
+                  className="text-xs font-mono w-5 h-5 flex items-center justify-center rounded-full mb-0.5 shrink-0"
                   style={{
                     background: isToday ? "#C17272" : "transparent",
                     color: isToday ? "#FFFFFF" : weekdayIdx === 6 ? "#7C93A8" : "#2B2622",
@@ -2071,7 +2071,7 @@ function ScheduleView({ structure, onChange }) {
                 {dayT.slice(0, visibleCount).map((t) => (
                   <span
                     key={t.id}
-                    className="text-xs w-full truncate rounded px-1 py-[1px]"
+                    className="text-[10px] md:text-xs w-full truncate rounded px-1 py-[1px]"
                     style={{
                       background: t.done ? "#F1ECEA" : "#F9EEEE",
                       color: t.done ? "#ABA39D" : "#5A2F2F",
