@@ -162,28 +162,32 @@ function ReorderableRow({ onMoveUp, onMoveDown, children, className = "", style 
 
 const seedStructure = () => {
   const cats = [
-    { id: "cat-hall", name: "웨딩홀", icon: "🏛️" },
-    { id: "cat-studio", name: "스튜디오", icon: "📷" },
-    { id: "cat-dress", name: "드레스", icon: "👗" },
-    { id: "cat-makeup", name: "메이크업", icon: "💄" },
-    { id: "cat-snap", name: "본식스냅", icon: "📸" },
+    { id: "cat-hall", name: "웨딩홀", icon: "🏛️", statusId: "none" },
+    { id: "cat-studio", name: "스튜디오", icon: "📷", statusId: "none" },
+    { id: "cat-dress", name: "드레스", icon: "👗", statusId: "none" },
+    { id: "cat-suit", name: "예복", icon: "👔", statusId: "none" },
+    { id: "cat-hairmakeup", name: "헤어/메이크업", icon: "💇", statusId: "none" },
+    { id: "cat-snap", name: "본식스냅", icon: "📸", statusId: "none" },
+    { id: "cat-ring", name: "웨딩링", icon: "💍", statusId: "none" },
+    { id: "cat-honeymoon", name: "신혼여행", icon: "✈️", statusId: "none" },
+    { id: "cat-planner", name: "플래너", icon: "🗂️", statusId: "none" },
+    { id: "cat-invitation", name: "청첩장", icon: "💌", statusId: "none" },
+    { id: "cat-parents", name: "혼주", icon: "👨‍👩‍👧", statusId: "none" },
+    { id: "cat-gift", name: "답례품", icon: "🎁", statusId: "none" },
+    { id: "cat-etc", name: "기타", icon: "📋", statusId: "none" },
   ];
-  const groupsByCategory = {
-    "cat-studio": [{ id: "grp-a", name: "A스튜디오" }],
-  };
+  const groupsByCategory = {};
   const schedule = [
-    { id: genId(), title: "웨딩홀 계약", date: todayISO(), done: false, categoryId: "cat-hall", memo: "" },
+    { id: genId(), title: "결혼준비 시작", date: todayISO(), done: false, categoryId: null, memo: "" },
   ];
-  const budget = [
-    { id: genId(), category: "웨딩홀", item: "대관료 계약금", planned: 1000000, actual: 1000000, dueDate: todayISO(), status: "계약금" },
-  ];
+  const budget = [];
   const statusOptions = [
     { id: "none", name: "상태없음", color: "#e6e6e6" },
     { id: "todo", name: "진행필요", color: "#ffcfc9" },
     { id: "progress", name: "진행중", color: "#ffe5a0" },
     { id: "confirmed", name: "확정", color: "#d4edbc" },
   ];
-  return { weddingDate: "", title: "🦀꼬께들의 결혼 준비", categories: cats, groupsByCategory, schedule, budget, statusOptions, announcements: [], checklist: [] };
+  return { weddingDate: "", title: "우리들의 결혼 준비", categories: cats, groupsByCategory, schedule, budget, statusOptions, announcements: [], checklist: [] };
 };
 
 const STATUS_COLORS = ["#e6e6e6", "#ffcfc9", "#ffe5a0", "#d4edbc"];
@@ -430,6 +434,7 @@ export default function App() {
   const [structure, setStructure] = useState(null);
   const [groupContents, setGroupContents] = useState({});
   const [activeCode, setActiveCode] = useState(null);
+  const [isNewWorkspace, setIsNewWorkspace] = useState(false); // 아직 supabase에 생성되지 않은 코드
 
   const [view, setView] = useState("home");
   const [selectedCatId, setSelectedCatId] = useState(null);
@@ -447,6 +452,9 @@ export default function App() {
   const setLocalActiveCode = (code) => {
     try { localStorage.setItem("wp-active-code", code); } catch {}
   };
+  const clearLocalActiveCode = () => {
+    try { localStorage.removeItem("wp-active-code"); } catch {}
+  };
   const getLocalRole = (code) => {
     try { return localStorage.getItem("wp-role:" + code); } catch { return null; }
   };
@@ -456,7 +464,7 @@ export default function App() {
 
   const rowToStructure = (row) => ({
     weddingDate: row.wedding_date || "",
-    title: row.title || "🦀꼬께들의 결혼 준비",
+    title: row.title || "우리들의 결혼 준비",
     categories: (row.categories || []).map((c) => (c.statusId ? c : { ...c, statusId: "none" })),
     groupsByCategory: row.groups_by_category || {},
     schedule: row.schedule || [],
@@ -479,46 +487,14 @@ export default function App() {
     updated_at: new Date().toISOString(),
   });
 
-  // 특정 공유코드의 데이터를 불러온다 (없으면 새로 생성)
-  const loadWorkspace = useCallback(async (code) => {
-    let { data: row, error } = await supabase.from("workspaces").select("*").eq("code", code).maybeSingle();
+  // 이미 존재하는 코드만 불러온다 (없으면 null 반환, 새로 만들지 않음)
+  const fetchWorkspace = useCallback(async (code) => {
+    const { data: row, error } = await supabase.from("workspaces").select("*").eq("code", code).maybeSingle();
     if (error) throw error;
+    return row;
+  }, []);
 
-    if (!row) {
-      const seed = seedStructure();
-      const insertRow = {
-        code,
-        title: seed.title,
-        wedding_date: seed.weddingDate,
-        user_a: "",
-        user_b: "",
-        categories: seed.categories,
-        groups_by_category: seed.groupsByCategory,
-        schedule: seed.schedule,
-        budget: seed.budget,
-        status_options: seed.statusOptions,
-        announcements: seed.announcements,
-        checklist: seed.checklist,
-      };
-      const { data: inserted, error: insErr } = await supabase.from("workspaces").insert(insertRow).select().single();
-      if (insErr) throw insErr;
-      row = inserted;
-
-      // 시드 그룹의 그룹 콘텐츠(예시 메모)도 함께 생성
-      const seededGC = seedGroupContents();
-      const gcRows = Object.entries(seededGC).map(([gid, content]) => ({
-        code,
-        group_id: gid,
-        memo_sections: content.memoSections,
-        photos: content.photos,
-        budget_note: content.budgetNote,
-        schedule_note: content.scheduleNote,
-      }));
-      if (gcRows.length) await supabase.from("group_contents").upsert(gcRows);
-    }
-
-    const s = rowToStructure(row);
-
+  const loadGroupContents = useCallback(async (code, s) => {
     const groupIds = Object.values(s.groupsByCategory || {}).flat().map((g) => g.id);
     const gc = {};
     if (groupIds.length) {
@@ -533,33 +509,56 @@ export default function App() {
       });
     }
     groupIds.forEach((gid) => { if (!gc[gid]) gc[gid] = { memoSections: [], photos: [], budgetNote: "", scheduleNote: "" }; });
+    return gc;
+  }, []);
 
+  const applyWorkspaceRow = useCallback(async (code, row) => {
+    const s = rowToStructure(row);
+    const gc = await loadGroupContents(code, s);
     setStructure(s);
     setGroupContents(gc);
     setActiveCode(code);
+    setIsNewWorkspace(false);
     setShareMeta({ shareCode: code, userA: row.user_a || "", userB: row.user_b || "" });
     setLocalActiveCode(code);
-  }, []);
+  }, [loadGroupContents]);
 
   // ---- 초기 로드 ----
   const initLoad = useCallback(async () => {
     setLoading(true);
     try {
-      let code = getLocalActiveCode();
-      if (!code) code = genShareCode();
+      const localCode = getLocalActiveCode();
+      if (localCode) {
+        const row = await fetchWorkspace(localCode);
+        if (row) {
+          await applyWorkspaceRow(localCode, row);
+          const role = getLocalRole(localCode);
+          setMyRole(role);
+          if (!role) setShowShareModal(true);
+          setSaveError("");
+          setLoading(false);
+          return;
+        }
+        // 로컬에 코드가 있지만 DB에는 없는 경우(삭제됨 등) → 새로 시작
+        clearLocalActiveCode();
+      }
 
-      await loadWorkspace(code);
-
-      const role = getLocalRole(code);
-      setMyRole(role);
-      if (!role) setShowShareModal(true);
+      // 이 브라우저에 저장된 코드가 없음 → 새 후보 코드만 보여주고, 저장 전엔 DB에 아무것도 만들지 않음
+      const candidate = genShareCode();
+      setShareMeta({ shareCode: candidate, userA: "", userB: "" });
+      setStructure(seedStructure());
+      setGroupContents({});
+      setActiveCode(null);
+      setIsNewWorkspace(true);
+      setMyRole(null);
+      setShowShareModal(true);
       setSaveError("");
     } catch (e) {
       setSaveError("데이터를 불러오지 못했어요. 다시 시도해주세요.");
     } finally {
       setLoading(false);
     }
-  }, [loadWorkspace]);
+  }, [fetchWorkspace, applyWorkspaceRow]);
 
   useEffect(() => { initLoad(); }, [initLoad]);
 
@@ -593,6 +592,7 @@ export default function App() {
 
   const persistStructure = useCallback(async (next) => {
     setStructure(next);
+    if (!activeCode) return; // 아직 워크스페이스가 생성되지 않음(저장 전)
     try {
       const { error } = await supabase.from("workspaces").update(structureToRowPatch(next)).eq("code", activeCode);
       if (error) setSaveError("저장에 실패했어요. 다시 시도해주세요.");
@@ -604,6 +604,7 @@ export default function App() {
 
   const persistGroup = useCallback(async (groupId, content) => {
     setGroupContents((prev) => ({ ...prev, [groupId]: content }));
+    if (!activeCode) return;
     try {
       const { error } = await supabase.from("group_contents").upsert({
         code: activeCode,
@@ -622,6 +623,7 @@ export default function App() {
 
   const persistShareMeta = useCallback(async (next) => {
     setShareMeta(next);
+    if (!activeCode) return;
     try {
       await supabase.from("workspaces").update({ user_a: next.userA, user_b: next.userB }).eq("code", activeCode);
     } catch {}
@@ -632,21 +634,51 @@ export default function App() {
     if (activeCode) setLocalRole(activeCode, role);
   }, [activeCode]);
 
-  // 공유코드를 바꿔 해당 코드의 데이터로 전체 새로고침
+  // "조회": 코드가 실제로 존재할 때만 전환. 존재하지 않으면 false를 반환(생성하지 않음)
   const switchCode = useCallback(async (newCode) => {
+    const row = await fetchWorkspace(newCode);
+    if (!row) return false;
     setSwitching(true);
     try {
       setView("home");
       setSelectedCatId(null);
       setSelectedGroupId(null);
-      await loadWorkspace(newCode);
+      await applyWorkspaceRow(newCode, row);
       const role = getLocalRole(newCode);
       setMyRole(role);
-      if (!role) setShowShareModal(true);
+      return true;
     } finally {
       setSwitching(false);
     }
-  }, [loadWorkspace]);
+  }, [fetchWorkspace, applyWorkspaceRow]);
+
+  // "저장" 클릭 시점에 실제로 코드를 생성 (그 전까지는 supabase에 아무것도 만들지 않음)
+  const createWorkspace = useCallback(async (code, userA, userB) => {
+    const seed = seedStructure();
+    const insertRow = {
+      code,
+      title: seed.title,
+      wedding_date: seed.weddingDate,
+      user_a: userA,
+      user_b: userB,
+      categories: seed.categories,
+      groups_by_category: seed.groupsByCategory,
+      schedule: seed.schedule,
+      budget: seed.budget,
+      status_options: seed.statusOptions,
+      announcements: seed.announcements,
+      checklist: seed.checklist,
+    };
+    const { data: inserted, error } = await supabase.from("workspaces").insert(insertRow).select().single();
+    if (error) { setSaveError("공유코드 생성에 실패했어요. 다시 시도해주세요."); throw error; }
+    setStructure(rowToStructure(inserted));
+    setGroupContents({});
+    setActiveCode(code);
+    setIsNewWorkspace(false);
+    setShareMeta({ shareCode: code, userA: inserted.user_a || "", userB: inserted.user_b || "" });
+    setLocalActiveCode(code);
+    setSaveError("");
+  }, []);
 
   if (loading || switching) {
     return (
@@ -706,6 +738,8 @@ export default function App() {
                 onSaveShareMeta={persistShareMeta}
                 onPickRole={persistMyRole}
                 onSwitchCode={switchCode}
+                isNewWorkspace={isNewWorkspace}
+                onCreateWorkspace={createWorkspace}
                 showShareModal={showShareModal}
                 setShowShareModal={setShowShareModal}
                 onAddAnnouncement={(content) => {
@@ -924,13 +958,16 @@ function TitleEditModal({ value, onSave, onClose }) {
   );
 }
 
-function ShareSetupModal({ meta, myRole, onSaveNames, onPickRole, onSwitchCode, onClose }) {
+function ShareSetupModal({ meta, myRole, isNew, onSaveNames, onPickRole, onSwitchCode, onCreateWorkspace, onClose }) {
   const [userA, setUserA] = useState(meta?.userA || "");
   const [userB, setUserB] = useState(meta?.userB || "");
   const [role, setRole] = useState(myRole || null);
   const [copied, setCopied] = useState(false);
   const [editingCode, setEditingCode] = useState(false);
   const [codeDraft, setCodeDraft] = useState(meta?.shareCode || "");
+  const [codeError, setCodeError] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const copyCode = async () => {
     const ok = await copyToClipboard(meta?.shareCode || "");
@@ -938,16 +975,37 @@ function ShareSetupModal({ meta, myRole, onSaveNames, onPickRole, onSwitchCode, 
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const save = () => {
-    onSaveNames({ ...meta, userA, userB });
-    if (role) onPickRole(role);
-    onClose();
+  const canSave = userA.trim() !== "" && userB.trim() !== "" && !editingCode;
+
+  const save = async () => {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      if (isNew) {
+        await onCreateWorkspace(meta.shareCode, userA.trim(), userB.trim());
+      } else {
+        await onSaveNames({ ...meta, userA: userA.trim(), userB: userB.trim() });
+      }
+      if (role) onPickRole(role);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const lookup = () => {
+  const lookup = async () => {
     const code = codeDraft.trim().toUpperCase();
-    if (!code || code === meta?.shareCode) { setEditingCode(false); return; }
-    onSwitchCode(code);
+    if (!code) return;
+    if (code === meta?.shareCode) { setEditingCode(false); setCodeError(""); return; }
+    setChecking(true);
+    setCodeError("");
+    try {
+      const ok = await onSwitchCode(code);
+      if (!ok) setCodeError("유효하지 않은 공유코드입니다.");
+      else setEditingCode(false);
+    } finally {
+      setChecking(false);
+    }
   };
 
   return (
@@ -959,45 +1017,61 @@ function ShareSetupModal({ meta, myRole, onSaveNames, onPickRole, onSwitchCode, 
         </div>
 
         <p className="text-xs mb-1.5" style={{ color: "#8C8480" }}>우리 커플의 공유코드</p>
-        <div className="flex items-center gap-1.5 mb-4">
+        <div className="flex items-center gap-1.5" style={{ marginBottom: codeError ? 4 : 16 }}>
           {editingCode ? (
             <input
               autoFocus
               value={codeDraft}
               onChange={(e) => setCodeDraft(e.target.value.toUpperCase())}
               onKeyDown={(e) => e.key === "Enter" && lookup()}
-              className="h-11 font-mono text-lg font-bold px-3 rounded-lg flex-1 text-center border"
+              className="h-11 min-w-0 font-mono text-lg font-bold px-3 rounded-lg flex-1 text-center border"
               style={{ color: "#C17272", letterSpacing: 2, borderColor: "#C17272" }}
             />
           ) : (
-            <span className="h-11 flex items-center justify-center font-mono text-lg font-bold px-3 rounded-lg flex-1" style={{ background: "#F3EFEC", color: "#C17272", letterSpacing: 2 }}>{meta?.shareCode || "------"}</span>
+            <span className="h-11 min-w-0 flex items-center justify-center font-mono text-lg font-bold px-3 rounded-lg flex-1" style={{ background: "#F3EFEC", color: "#C17272", letterSpacing: 2 }}>{meta?.shareCode || "------"}</span>
           )}
-          <button onClick={() => { setCodeDraft(meta?.shareCode || ""); setEditingCode((v) => !v); }} className="h-11 text-xs px-3 rounded-lg shrink-0" style={{ background: "#F3EFEC", color: "#6B6157" }}>{editingCode ? "취소" : "수정"}</button>
+          <button
+            onClick={() => { setCodeDraft(meta?.shareCode || ""); setCodeError(""); setEditingCode((v) => !v); }}
+            className="h-11 text-xs px-3 rounded-lg shrink-0"
+            style={{ background: "#F3EFEC", color: "#6B6157" }}
+          >
+            {editingCode ? "취소" : "수정"}
+          </button>
           {editingCode ? (
-            <button onClick={lookup} className="h-11 text-xs px-3 rounded-lg shrink-0 text-white" style={{ background: "#C17272" }}>조회</button>
+            <button onClick={lookup} disabled={checking} className="h-11 text-xs px-3 rounded-lg shrink-0 text-white" style={{ background: "#C17272" }}>{checking ? "확인중" : "조회"}</button>
           ) : (
             <button onClick={copyCode} className="h-11 text-xs px-3 rounded-lg shrink-0" style={{ background: "#F9EEEE", color: "#C17272" }}>{copied || "복사"}</button>
           )}
         </div>
+        {codeError && <p className="text-[11px] mb-2" style={{ color: "#C17272" }}>{codeError}</p>}
         <p className="text-[11px] mb-4" style={{ color: "#ABA39D" }}>
           {editingCode
-            ? "다른 코드를 입력하고 조회하면, 그 코드로 저장된 데이터로 화면이 전환돼요. 원래 코드로 돌아가려면 원래 코드를 다시 입력해 조회하세요."
-            : "이 코드를 배우자에게 알려주고 같은 사이트 주소에서 입력하면, 기기가 달라도 같은 데이터를 실시간으로 함께 보고 편집할 수 있어요."}
+            ? "이미 만들어진 코드만 입력할 수 있어요. 입력 후 조회하면 그 코드로 저장된 데이터로 화면이 전환돼요."
+            : isNew
+              ? "이 코드는 아직 저장되지 않았어요. 아래 정보를 입력하고 저장하면 이 코드로 워크스페이스가 만들어져요. 이미 코드가 있다면 위에서 수정 → 조회로 입력해주세요."
+              : "이 코드를 배우자에게 알려주고 같은 사이트 주소에서 입력하면, 기기가 달라도 같은 데이터를 실시간으로 함께 보고 편집할 수 있어요."}
         </p>
 
-        <p className="text-xs font-bold mb-2" style={{ color: "#8C8480" }}>사용자 이름 · 본인 표시</p>
+        <p className="text-xs font-bold mb-2" style={{ color: "#8C8480" }}>결혼 주인공 정보</p>
         <div className="flex flex-col gap-2 mb-5">
           <div className="flex items-center gap-2">
-            <input value={userA} onChange={(e) => setUserA(e.target.value)} placeholder="사용자 A 이름" className="border rounded-lg px-3 py-2 text-sm flex-1" style={{ borderColor: "#ECE7E4" }} />
+            <input value={userA} onChange={(e) => setUserA(e.target.value)} placeholder="신랑 이름" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-0" style={{ borderColor: "#ECE7E4" }} />
             <button onClick={() => setRole("A")} className="text-xs px-3 py-2 rounded-lg shrink-0" style={{ background: role === "A" ? "#C17272" : "#F3EFEC", color: role === "A" ? "#FFFFFF" : "#6B6157" }}>{role === "A" ? "✓ 본인" : "본인"}</button>
           </div>
           <div className="flex items-center gap-2">
-            <input value={userB} onChange={(e) => setUserB(e.target.value)} placeholder="사용자 B 이름" className="border rounded-lg px-3 py-2 text-sm flex-1" style={{ borderColor: "#ECE7E4" }} />
+            <input value={userB} onChange={(e) => setUserB(e.target.value)} placeholder="신부 이름" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-0" style={{ borderColor: "#ECE7E4" }} />
             <button onClick={() => setRole("B")} className="text-xs px-3 py-2 rounded-lg shrink-0" style={{ background: role === "B" ? "#C17272" : "#F3EFEC", color: role === "B" ? "#FFFFFF" : "#6B6157" }}>{role === "B" ? "✓ 본인" : "본인"}</button>
           </div>
         </div>
 
-        <button onClick={save} className="w-full h-11 rounded-lg text-sm font-medium text-white" style={{ background: "#C17272" }}>저장</button>
+        <button
+          onClick={save}
+          disabled={!canSave || saving}
+          className="w-full h-11 rounded-lg text-sm font-medium text-white"
+          style={{ background: canSave ? "#C17272" : "#D8CFCB", cursor: canSave ? "pointer" : "not-allowed" }}
+        >
+          {saving ? "저장 중..." : "저장"}
+        </button>
       </div>
     </div>
   );
@@ -1134,9 +1208,6 @@ function ChecklistSection({ checklist, onUpdate }) {
 
   const undone = checklist.filter((c) => !c.done);
   const done = [...checklist.filter((c) => c.done)].sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
-  const sorted = [...undone, ...done];
-  const visible = sorted.slice(0, visibleCount);
-  const hasMore = sorted.length > visibleCount;
 
   const undoneIds = undone.map((c) => c.id);
   const reorderUndone = useCallback((newIdOrder) => {
@@ -1145,6 +1216,12 @@ function ChecklistSection({ checklist, onUpdate }) {
     onUpdate([...nextUndone, ...checklist.filter((c) => c.done)]);
   }, [undone, checklist, onUpdate]);
   const dnd = useDragReorder(undoneIds, reorderUndone);
+
+  // 드래그 중에도 실시간으로 반영되도록 dnd.order 기준으로 렌더링
+  const orderedUndone = dnd.order.map((id) => undone.find((c) => c.id === id)).filter(Boolean);
+  const sorted = [...orderedUndone, ...done];
+  const visible = sorted.slice(0, visibleCount);
+  const hasMore = sorted.length > visibleCount;
 
   const addItem = () => {
     const id = genId();
@@ -1182,7 +1259,7 @@ function ChecklistSection({ checklist, onUpdate }) {
             const isEditing = editingId === item.id;
             if (isEditing) {
               return (
-                <div key={item.id} className="flex items-center gap-2 rounded-lg py-2">
+                <div key={item.id} className="flex items-center gap-2 rounded-lg" style={{ paddingTop: 2, paddingBottom: 2 }}>
                   <input
                     autoFocus
                     value={draft}
@@ -1197,7 +1274,7 @@ function ChecklistSection({ checklist, onUpdate }) {
               );
             }
             const row = (
-              <div className="flex items-center gap-2.5 rounded-lg py-2">
+              <div className="flex items-center gap-2.5 rounded-lg" style={{ paddingTop: 2, paddingBottom: 2 }}>
                 <button onClick={() => toggleDone(item.id)} className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ background: item.done ? "#7C8B6F" : "transparent", border: item.done ? "none" : "1.5px solid #D8CFCB" }}>
                   {item.done && <Check size={12} color="white" />}
                 </button>
@@ -1224,7 +1301,7 @@ function ChecklistSection({ checklist, onUpdate }) {
   );
 }
 
-function HomeView({ structure, goCategory, setView, onSetDate, onSetTitle, shareMeta, myRole, onSaveShareMeta, onPickRole, onSwitchCode, showShareModal, setShowShareModal, onAddAnnouncement, onEditAnnouncement, onDeleteAnnouncement, onUpdateChecklist }) {
+function HomeView({ structure, goCategory, setView, onSetDate, onSetTitle, shareMeta, myRole, onSaveShareMeta, onPickRole, onSwitchCode, isNewWorkspace, onCreateWorkspace, showShareModal, setShowShareModal, onAddAnnouncement, onEditAnnouncement, onDeleteAnnouncement, onUpdateChecklist }) {
   const [editingDate, setEditingDate] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [addingAnnouncement, setAddingAnnouncement] = useState(false);
@@ -1238,7 +1315,7 @@ function HomeView({ structure, goCategory, setView, onSetDate, onSetTitle, share
   const upcoming = upcomingAll.slice(0, 8);
   const announcements = structure.announcements || [];
   const card = { background: "#FFFFFF", border: "1px solid #ECE7E4" };
-  const title = structure.title || "🦀꼬께들의 결혼 준비";
+  const title = structure.title || "우리들의 결혼 준비";
 
   return (
     <div className="flex flex-col gap-6">
@@ -1325,7 +1402,7 @@ function HomeView({ structure, goCategory, setView, onSetDate, onSetTitle, share
             )}
           </div>
 
-          <div className="md:w-[576px] shrink-0 rounded-xl p-3" style={{ background: "#F9EEEE" }}>
+          <div className="md:w-[288px] shrink-0 rounded-xl p-3" style={{ background: "#F9EEEE" }}>
             <p className="text-xs font-bold mb-2" style={{ color: "#C17272" }}>{twoWeekLabel()}</p>
             <MiniCalendar schedule={structure.schedule} />
           </div>
@@ -1348,9 +1425,11 @@ function HomeView({ structure, goCategory, setView, onSetDate, onSetTitle, share
         <ShareSetupModal
           meta={shareMeta}
           myRole={myRole}
+          isNew={isNewWorkspace}
           onSaveNames={onSaveShareMeta}
           onPickRole={onPickRole}
           onSwitchCode={onSwitchCode}
+          onCreateWorkspace={onCreateWorkspace}
           onClose={() => setShowShareModal(false)}
         />
       )}
@@ -1613,11 +1692,20 @@ function CategoryDetailView({ structure, category, onBack, onOpenGroup, onChange
           const slots = [photos[0] || null, photos[1] || null, photos[2] || null];
           return (
             <div key={g.id} className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: "1px solid #ECE7E4" }}>
-              <div className="flex items-center" style={{ paddingTop: 24, paddingBottom: 24 }}>
-                <button onClick={() => onOpenGroup(g.id)} className="flex-1 flex items-center px-4 text-left min-w-0">
-                  <p className="font-medium text-sm">{g.name}</p>
-                </button>
-                <div className="flex items-center gap-3 px-3 shrink-0">
+              <div className="flex flex-col md:flex-row md:items-center" style={{ paddingTop: 24, paddingBottom: 24 }}>
+                <div className="flex items-center px-4 md:flex-1 md:min-w-0">
+                  <button onClick={() => onOpenGroup(g.id)} className="flex-1 text-left min-w-0">
+                    <p className="font-medium text-sm truncate">{g.name}</p>
+                  </button>
+                  <div className="md:hidden flex items-center shrink-0">
+                    <ActionMenu
+                      onEdit={() => { setRenamingGroupId(g.id); setRenameDraft(g.name); }}
+                      onDelete={() => removeGroup(g.id)}
+                      deleteLabel="정말로 이 그룹을 삭제하시겠어요?"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 px-4 md:px-3 mt-3 md:mt-0 shrink-0">
                   {slots.map((p, i) => (
                     p ? (
                       <img key={i} src={p.dataUrl} alt="" className="rounded-lg object-cover shrink-0" style={{ width: 80, height: 80 }} />
@@ -1626,7 +1714,7 @@ function CategoryDetailView({ structure, category, onBack, onOpenGroup, onChange
                     )
                   ))}
                 </div>
-                <div className="flex items-center px-2 shrink-0">
+                <div className="hidden md:flex items-center px-2 shrink-0">
                   <ActionMenu
                     onEdit={() => { setRenamingGroupId(g.id); setRenameDraft(g.name); }}
                     onDelete={() => removeGroup(g.id)}
