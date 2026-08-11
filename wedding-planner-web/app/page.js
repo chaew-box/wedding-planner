@@ -840,6 +840,7 @@ export default function App() {
                 category={structure.categories.find((c) => c.id === selectedCatId)}
                 group={(structure.groupsByCategory[selectedCatId] || []).find((g) => g.id === selectedGroupId)}
                 content={groupContents[selectedGroupId] || { memoSections: [], photos: [], budgetNote: "", scheduleNote: "" }}
+                activeCode={activeCode}
                 onBack={() => setSelectedGroupId(null)}
                 onSave={(content) => persistGroup(selectedGroupId, content)}
                 onRenameGroup={(name) => {
@@ -1830,11 +1831,40 @@ function NotesBox({ budgetNote, scheduleNote, onChangeBudget, onChangeSchedule }
   );
 }
 
-function GroupDetailView({ category, group, content, onBack, onSave, onRenameGroup, openLightbox }) {
+function ShareGroupLinkModal({ code, groupId, groupName, onClose }) {
+  const [copied, setCopied] = useState(false);
+  let link = "";
+  try { link = window.location.origin + "/share/" + code + "/" + groupId; } catch {}
+
+  const copy = async () => {
+    const ok = await copyToClipboard(link);
+    setCopied(ok ? "복사됨" : "복사 실패");
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(30,24,22,0.45)" }}>
+      <div className="rounded-2xl p-5 w-full max-w-sm" style={{ background: "#FFFFFF" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-bold text-sm">'{groupName}' 공유 링크</h2>
+          <button onClick={onClose} className="p-1 rounded hover:bg-gray-50" style={{ color: "#ABA39D" }}><X size={16} /></button>
+        </div>
+        <div className="flex items-center gap-2 mb-3">
+          <input readOnly value={link} className="flex-1 min-w-0 border rounded-lg px-3 py-2 text-xs" style={{ borderColor: "#ECE7E4", color: "#6B6157" }} />
+          <button onClick={copy} className="text-xs px-3 py-2 rounded-lg shrink-0" style={{ background: "#F9EEEE", color: "#C17272" }}>{copied || "복사"}</button>
+        </div>
+        <p className="text-[11px]" style={{ color: "#ABA39D" }}>이 링크는 로그인이나 앱 없이 누구나 브라우저에서 바로 열람할 수 있어요(메모+사진, 보기 전용). 업체 담당자분께 그대로 보내시면 돼요.</p>
+      </div>
+    </div>
+  );
+}
+
+function GroupDetailView({ category, group, content, activeCode, onBack, onSave, onRenameGroup, openLightbox }) {
   const [local, setLocal] = useState(content);
   const [uploading, setUploading] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(group?.name || "");
+  const [sharing, setSharing] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => setLocal(content), [group?.id]);
@@ -1878,16 +1908,21 @@ function GroupDetailView({ category, group, content, onBack, onSave, onRenameGro
       </button>
 
       <div className="mb-6">
-        <div className="flex items-center gap-2">
-          {editingName ? (
-            <input autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
-              onBlur={() => { onRenameGroup(nameDraft.trim() || group.name); setEditingName(false); }}
-              onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
-              className="font-display text-2xl font-bold border-b bg-transparent" style={{ borderColor: "#D8CFCB" }} />
-          ) : (
-            <h1 className="font-display text-2xl font-bold">{group.name}</h1>
-          )}
-          <button onClick={() => setEditingName(true)} className="p-1.5 rounded hover:bg-gray-100" style={{ color: "#ABA39D" }}><Pencil size={15} /></button>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 min-w-0">
+            {editingName ? (
+              <input autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={() => { onRenameGroup(nameDraft.trim() || group.name); setEditingName(false); }}
+                onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+                className="font-display text-2xl font-bold border-b bg-transparent" style={{ borderColor: "#D8CFCB" }} />
+            ) : (
+              <h1 className="font-display text-2xl font-bold truncate">{group.name}</h1>
+            )}
+            <button onClick={() => setEditingName(true)} className="p-1.5 rounded hover:bg-gray-100 shrink-0" style={{ color: "#ABA39D" }}><Pencil size={15} /></button>
+          </div>
+          <button onClick={() => setSharing(true)} className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg shrink-0" style={{ background: "#F3EFEC", color: "#6B6157" }}>
+            <Send size={12} /> 공유
+          </button>
         </div>
       </div>
 
@@ -1918,6 +1953,9 @@ function GroupDetailView({ category, group, content, onBack, onSave, onRenameGro
             </div>
           ))}
         </div>
+      )}
+      {sharing && (
+        <ShareGroupLinkModal code={activeCode} groupId={group.id} groupName={group.name} onClose={() => setSharing(false)} />
       )}
     </div>
   );
