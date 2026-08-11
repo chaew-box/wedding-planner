@@ -16,7 +16,7 @@ const genId = () => Math.random().toString(36).slice(2, 10);
 const fmtWon = (n) => (Number(n) || 0).toLocaleString("ko-KR") + "원";
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-function compressImage(file, maxW = 1000, quality = 0.72) {
+function compressImage(file, maxW = 1400, quality = 0.85) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -340,13 +340,37 @@ function useDragReorder(itemIds, onReorderComplete) {
 function DragRow({ id, dnd, children, className = "", style }) {
   const timer = useRef(null);
   const moved = useRef(false);
-  const onDown = () => { moved.current = false; timer.current = setTimeout(() => { moved.current = true; dnd.startDrag(id); }, 450); };
-  const onUp = () => { if (timer.current) clearTimeout(timer.current); };
+  const startPos = useRef({ x: 0, y: 0 });
+  const HOLD_MS = 2000;
+  const MOVE_CANCEL_PX = 10;
+
+  const getXY = (e) => {
+    if (e.touches && e.touches[0]) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  };
+
+  const onDown = (e) => {
+    moved.current = false;
+    startPos.current = getXY(e.nativeEvent || e);
+    timer.current = setTimeout(() => { moved.current = true; dnd.startDrag(id); }, HOLD_MS);
+  };
+  const onMove = (e) => {
+    if (!timer.current) return;
+    const { x, y } = getXY(e.nativeEvent || e);
+    const dx = Math.abs(x - startPos.current.x);
+    const dy = Math.abs(y - startPos.current.y);
+    if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+  };
+  const onUp = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
   const isDragging = dnd.draggingId === id;
   return (
     <div
       ref={(el) => { dnd.rowRefs.current[id] = el; }}
       onPointerDown={onDown}
+      onPointerMove={onMove}
       onPointerUp={onUp}
       onPointerLeave={onUp}
       onPointerCancel={onUp}
@@ -359,7 +383,7 @@ function DragRow({ id, dnd, children, className = "", style }) {
         position: "relative",
         zIndex: isDragging ? 50 : "auto",
         transition: isDragging ? "none" : "transform 150ms, box-shadow 150ms",
-        touchAction: "none",
+        touchAction: isDragging ? "none" : "pan-y",
       }}
     >
       {children}
@@ -439,6 +463,26 @@ export default function App() {
   const [view, setView] = useState("home");
   const [selectedCatId, setSelectedCatId] = useState(null);
   const [selectedGroupId, setSelectedGroupId] = useState(null);
+
+  // 모바일 기기 뒤로가기(시스템 제스처/버튼)를 앱 내부의 "이전 화면"으로 동작하게 만든다.
+  // (Vercel/호스팅과는 무관한 순수 클라이언트 라우팅 이슈였어요 — History API로 해결 가능)
+  const isPoppingRef = useRef(false);
+  useEffect(() => {
+    window.history.replaceState({ view: "home", selectedCatId: null, selectedGroupId: null }, "");
+    const onPopState = (e) => {
+      isPoppingRef.current = true;
+      const s = e.state || {};
+      setView(s.view || "home");
+      setSelectedCatId(s.selectedCatId ?? null);
+      setSelectedGroupId(s.selectedGroupId ?? null);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  useEffect(() => {
+    if (isPoppingRef.current) { isPoppingRef.current = false; return; }
+    window.history.pushState({ view, selectedCatId, selectedGroupId }, "");
+  }, [view, selectedCatId, selectedGroupId]);
   const [lightbox, setLightbox] = useState(null);
 
   const [shareMeta, setShareMeta] = useState(null); // { shareCode, userA, userB }
@@ -562,18 +606,25 @@ export default function App() {
 
   useEffect(() => { initLoad(); }, [initLoad]);
 
+  // 내가 방금 로컬에서 저장을 시작한 시각 — 이 시간 근처에 돌아오는 realtime 이벤트는
+  // "내가 방금 보낸 변경의 메아리"일 가능성이 높으므로 무시해서, 타이핑 중 값이 되돌아오는(튀는) 걸 방지
+  const lastLocalWriteAtRef = useRef(0);
+  const SELF_ECHO_WINDOW_MS = 2500;
+
   // ---- 실시간 동기화: 같은 코드의 다른 기기 변경사항을 자동 반영 ----
   useEffect(() => {
     if (!activeCode) return;
     const channel = supabase
       .channel("workspace-" + activeCode)
       .on("postgres_changes", { event: "*", schema: "public", table: "workspaces", filter: "code=eq." + activeCode }, (payload) => {
+        if (Date.now() - lastLocalWriteAtRef.current < SELF_ECHO_WINDOW_MS) return;
         if (payload.new) {
           setStructure(rowToStructure(payload.new));
           setShareMeta((prev) => ({ ...(prev || {}), shareCode: activeCode, userA: payload.new.user_a || "", userB: payload.new.user_b || "" }));
         }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "group_contents", filter: "code=eq." + activeCode }, (payload) => {
+        if (Date.now() - lastLocalWriteAtRef.current < SELF_ECHO_WINDOW_MS) return;
         const r = payload.new;
         if (!r) return;
         setGroupContents((prev) => ({
@@ -593,6 +644,7 @@ export default function App() {
   const persistStructure = useCallback(async (next) => {
     setStructure(next);
     if (!activeCode) return; // 아직 워크스페이스가 생성되지 않음(저장 전)
+    lastLocalWriteAtRef.current = Date.now();
     try {
       const { error } = await supabase.from("workspaces").update(structureToRowPatch(next)).eq("code", activeCode);
       if (error) setSaveError("저장에 실패했어요. 다시 시도해주세요.");
@@ -605,6 +657,7 @@ export default function App() {
   const persistGroup = useCallback(async (groupId, content) => {
     setGroupContents((prev) => ({ ...prev, [groupId]: content }));
     if (!activeCode) return;
+    lastLocalWriteAtRef.current = Date.now();
     try {
       const { error } = await supabase.from("group_contents").upsert({
         code: activeCode,
@@ -968,6 +1021,7 @@ function ShareSetupModal({ meta, myRole, isNew, onSaveNames, onPickRole, onSwitc
   const [codeError, setCodeError] = useState("");
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveErrorMsg, setSaveErrorMsg] = useState("");
 
   const copyCode = async () => {
     const ok = await copyToClipboard(meta?.shareCode || "");
@@ -980,6 +1034,7 @@ function ShareSetupModal({ meta, myRole, isNew, onSaveNames, onPickRole, onSwitc
   const save = async () => {
     if (!canSave || saving) return;
     setSaving(true);
+    setSaveErrorMsg("");
     try {
       if (isNew) {
         await onCreateWorkspace(meta.shareCode, userA.trim(), userB.trim());
@@ -988,6 +1043,8 @@ function ShareSetupModal({ meta, myRole, isNew, onSaveNames, onPickRole, onSwitc
       }
       if (role) onPickRole(role);
       onClose();
+    } catch (e) {
+      setSaveErrorMsg("저장에 실패했어요. 인터넷 연결을 확인하고 다시 시도해주세요.");
     } finally {
       setSaving(false);
     }
@@ -1013,8 +1070,15 @@ function ShareSetupModal({ meta, myRole, isNew, onSaveNames, onPickRole, onSwitc
       <div className="rounded-2xl p-5 w-full max-w-sm" style={{ background: "#FFFFFF" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-bold text-sm">공유코드 설정</h2>
-          <button onClick={onClose} className="p-1 rounded hover:bg-gray-50" style={{ color: "#ABA39D" }}><X size={16} /></button>
+          {!isNew && (
+            <button onClick={onClose} className="p-1 rounded hover:bg-gray-50" style={{ color: "#ABA39D" }}><X size={16} /></button>
+          )}
         </div>
+        {isNew && (
+          <p className="text-[11px] mb-3 px-2.5 py-2 rounded-lg" style={{ background: "#F9EEEE", color: "#C17272" }}>
+            아직 저장되지 않았어요. 아래 정보를 입력하고 저장을 눌러야 데이터가 만들어져요. 이미 코드가 있다면 위에서 수정 → 조회로 입력해주세요.
+          </p>
+        )}
 
         <p className="text-xs mb-1.5" style={{ color: "#8C8480" }}>우리 커플의 공유코드</p>
         <div className="flex items-center gap-1.5" style={{ marginBottom: codeError ? 4 : 16 }}>
@@ -1064,6 +1128,7 @@ function ShareSetupModal({ meta, myRole, isNew, onSaveNames, onPickRole, onSwitc
           </div>
         </div>
 
+        {saveErrorMsg && <p className="text-[11px] mb-2" style={{ color: "#C17272" }}>{saveErrorMsg}</p>}
         <button
           onClick={save}
           disabled={!canSave || saving}
@@ -1861,13 +1926,16 @@ function GroupDetailView({ category, group, content, onBack, onSave, onRenameGro
 function Lightbox({ photos, startIdx, onClose }) {
   const [idx, setIdx] = useState(startIdx);
   const photo = photos[idx];
+  const showArrows = photos.length > 1;
+  const prev = () => setIdx((i) => (i - 1 + photos.length) % photos.length);
+  const next = () => setIdx((i) => (i + 1) % photos.length);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "rgba(20,16,14,0.9)" }}>
       <button className="absolute top-5 right-5 p-2 rounded-full" style={{ background: "rgba(255,255,255,0.15)" }} onClick={onClose}><X color="white" size={20} /></button>
       <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
-        {idx > 0 && <button onClick={() => setIdx(idx - 1)} className="text-white/70 hover:text-white"><ChevronLeft size={28} /></button>}
+        {showArrows && <button onClick={prev} className="text-white/70 hover:text-white"><ChevronLeft size={28} /></button>}
         <img src={photo.dataUrl} alt="" className="max-h-[80vh] max-w-[80vw] rounded-lg object-contain" />
-        {idx < photos.length - 1 && <button onClick={() => setIdx(idx + 1)} className="text-white/70 hover:text-white rotate-180"><ChevronLeft size={28} /></button>}
+        {showArrows && <button onClick={next} className="text-white/70 hover:text-white rotate-180"><ChevronLeft size={28} /></button>}
       </div>
     </div>
   );
