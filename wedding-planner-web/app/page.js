@@ -465,10 +465,10 @@ export default function App() {
   const [selectedGroupId, setSelectedGroupId] = useState(null);
 
   // 모바일 기기 뒤로가기(시스템 제스처/버튼)를 앱 내부의 "이전 화면"으로 동작하게 만든다.
-  // (Vercel/호스팅과는 무관한 순수 클라이언트 라우팅 이슈였어요 — History API로 해결 가능)
+  // Next.js도 history.state에 자체 내부 정보를 넣어두므로, 덮어쓰지 않고 병합해서 유지해야 함
   const isPoppingRef = useRef(false);
   useEffect(() => {
-    window.history.replaceState({ view: "home", selectedCatId: null, selectedGroupId: null }, "");
+    window.history.replaceState({ ...window.history.state, view: "home", selectedCatId: null, selectedGroupId: null }, "");
     const onPopState = (e) => {
       isPoppingRef.current = true;
       const s = e.state || {};
@@ -481,7 +481,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (isPoppingRef.current) { isPoppingRef.current = false; return; }
-    window.history.pushState({ view, selectedCatId, selectedGroupId }, "");
+    window.history.pushState({ ...window.history.state, view, selectedCatId, selectedGroupId }, "");
   }, [view, selectedCatId, selectedGroupId]);
   const [lightbox, setLightbox] = useState(null);
 
@@ -1929,14 +1929,40 @@ function Lightbox({ photos, startIdx, onClose }) {
   const showArrows = photos.length > 1;
   const prev = () => setIdx((i) => (i - 1 + photos.length) % photos.length);
   const next = () => setIdx((i) => (i + 1) % photos.length);
+
+  const dragStartX = useRef(null);
+  const onPointerDown = (e) => { dragStartX.current = e.clientX; };
+  const onPointerUp = (e) => {
+    if (dragStartX.current == null) return;
+    const delta = e.clientX - dragStartX.current;
+    dragStartX.current = null;
+    if (!showArrows) return;
+    if (delta > 50) prev();
+    else if (delta < -50) next();
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "rgba(20,16,14,0.9)" }}>
-      <button className="absolute top-5 right-5 p-2 rounded-full" style={{ background: "rgba(255,255,255,0.15)" }} onClick={onClose}><X color="white" size={20} /></button>
-      <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
-        {showArrows && <button onClick={prev} className="text-white/70 hover:text-white"><ChevronLeft size={28} /></button>}
-        <img src={photo.dataUrl} alt="" className="max-h-[80vh] max-w-[80vw] rounded-lg object-contain" />
-        {showArrows && <button onClick={next} className="text-white/70 hover:text-white rotate-180"><ChevronLeft size={28} /></button>}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "rgba(20,16,14,0.9)", touchAction: "pan-y" }}>
+      <button className="absolute top-5 right-5 z-10 p-2 rounded-full" style={{ background: "rgba(255,255,255,0.15)" }} onClick={onClose}><X color="white" size={20} /></button>
+      {showArrows && (
+        <button onClick={prev} className="absolute left-3 md:left-6 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full text-white/70 hover:text-white" style={{ background: "rgba(255,255,255,0.1)" }}>
+          <ChevronLeft size={28} />
+        </button>
+      )}
+      <div
+        className="flex items-center justify-center w-full h-full select-none"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+        style={{ touchAction: "pan-y" }}
+      >
+        <img src={photo.dataUrl} alt="" draggable={false} className="max-h-[80vh] max-w-[80vw] rounded-lg object-contain" />
       </div>
+      {showArrows && (
+        <button onClick={next} className="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full text-white/70 hover:text-white" style={{ background: "rgba(255,255,255,0.1)" }}>
+          <ChevronLeft size={28} className="rotate-180" />
+        </button>
+      )}
     </div>
   );
 }
